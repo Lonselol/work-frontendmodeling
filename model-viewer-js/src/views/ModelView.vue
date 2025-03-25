@@ -72,7 +72,6 @@ const hasMaterials = (node) => {
   return node.materials;
 };
 
-// Проверяет видимость ноды (по альфа-каналу первого материала)
 const isNodeVisible = (node) => {
   if (!hasMaterials(node)) return false;
   return Array.from(node.materials.values()).every(material => {
