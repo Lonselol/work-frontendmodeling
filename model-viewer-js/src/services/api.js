@@ -3,11 +3,17 @@ import axios from 'axios';
 const BASE_URL = "https://api.example.com";
 
 const ENDPOINTS = {
-    getModel: "/user/{id}",
+    getModel: "",
+    getModelState: "",
   };
 
   const sendRequest = async (endpointKey, params = {}, method = 'GET') => {
     let endpoint = ENDPOINTS[endpointKey];
+
+    if (endpoint == ENDPOINTS.getModelState){
+      return [{"mat_0":0}]
+    }
+
     if (!endpoint) {
       throw new Error(`Endpoint ${endpointKey} not found in API configuration`);
     }

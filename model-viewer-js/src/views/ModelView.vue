@@ -1,6 +1,7 @@
 <script setup>
 import '@google/model-viewer'
 import { ref, onMounted } from 'vue'
+import { sendRequest } from '../services/api'
 
 const props = defineProps({
   model: String,
@@ -8,15 +9,29 @@ const props = defineProps({
 })
 
 const modelViewerRef = ref(null)
-const materials = ref([]) // Массив для хранения ссылок на материалы
+const materials = ref([])
 const modelLoaded = ref(false)
 
-const onModelLoad = () => {
+const onModelLoad = async () => {
   const modelViewer = modelViewerRef.value
   if (modelViewer && modelViewer.model) {
-    materials.value = modelViewer.model.materials // Сохраняем все материалы в реактивный массив
-    modelLoaded.value = true
-    console.log(materials.value) // Выведем все материалы
+    materials.value = modelViewer.model.materials
+    console.log(materials.value)
+    try{
+    const materialData = await sendRequest('getModelState')
+    console.log(materialData)
+    materialData.forEach((item,index) => {
+      const materialName = Object.keys(item)[0];
+      const material = materials.value.find((m) => m.name === materialName);
+      const percent = item[materialName];
+      const color = calculateColor(percent);
+      console.log(color);
+      material.pbrMetallicRoughness.setBaseColorFactor(color);
+    });
+    } catch (error) {
+      console.error('Error fetching material wear data:', error)
+    }
+  modelLoaded.value = true
   }
 }
 
@@ -30,14 +45,17 @@ const toggleVisibility = (index) => {
   console.log(material.pbrMetallicRoughness.baseColorFactor[3])
 }
 
-const changeColor = (index, colorString) => {
-  const material = materials.value[index]
-  material.pbrMetallicRoughness.setBaseColorFactor(colorString)
-}
-
 const getColor = (index) => {
   const material = materials.value[index]
   return material.pbrMetallicRoughness.baseColorFactor
+}
+
+const calculateColor = (percent=0, currentAlpha=1) => {
+  const red = Math.min(255, (percent * 2.55))
+  const green = 255 - red
+  const blue = 0
+  const alpha = currentAlpha
+  return [red / 255, green / 255, blue / 255, alpha]
 }
 </script>
 
