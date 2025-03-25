@@ -1,7 +1,7 @@
 <script setup>
 import '@google/model-viewer'
 import { ref, onMounted } from 'vue'
-import { sendRequest } from '../services/api'
+import { getModelStats } from '../services/params'
 
 const props = defineProps({
   model: String,
@@ -10,39 +10,48 @@ const props = defineProps({
 
 const modelViewerRef = ref(null)
 const materials = ref([])
+const nodes = ref([])
 const modelLoaded = ref(false)
 
 const onModelLoad = async () => {
   const modelViewer = modelViewerRef.value
   if (modelViewer && modelViewer.model) {
     materials.value = modelViewer.model.materials
-    console.log(materials.value)
-    try{
-    const materialData = await sendRequest('getModelState')
-    console.log(materialData)
-    materialData.forEach((item,index) => {
-      const materialName = Object.keys(item)[0];
-      const material = materials.value.find((m) => m.name === materialName);
-      const percent = item[materialName];
+    nodes.value = modelViewer.model[Object.getOwnPropertySymbols(modelViewer.model).find(sym => sym.description === 'hierarchy')];
+    const nodesData = getModelStats()
+    nodesData.forEach((item,index) => {
+      
+      const nodeName = Object.keys(item)[0];
+
+      const currentNode = nodes.value.find((n) => n.name === nodeName);
+
+      const percent = item[nodeName];
+
       const color = calculateColor(percent);
-      console.log(color);
-      material.pbrMetallicRoughness.setBaseColorFactor(color);
+
+      const currentNodeMaterials = currentNode.materials
+
+      currentNodeMaterials.forEach((currentMaterial, key) => {
+        currentMaterial.pbrMetallicRoughness.setBaseColorFactor(color);
+      });
+
     });
-    } catch (error) {
-      console.error('Error fetching material wear data:', error)
-    }
   modelLoaded.value = true
   }
 }
 
-const toggleVisibility = (index) => {
-  const material = materials.value[index]
-  material.setAlphaMode("BLEND");
-  const currentAlpha = material.pbrMetallicRoughness.baseColorFactor[3]
-  const color = material.pbrMetallicRoughness.baseColorFactor
-  color[3] = currentAlpha === 1 ? 0 : 1
-  material.pbrMetallicRoughness.setBaseColorFactor(color)
-  console.log(material.pbrMetallicRoughness.baseColorFactor[3])
+const toggleVisibility = (nodeName) => {
+  const currentNode = nodes.value.find((n) => n.name === nodeName);
+  const currentNodeMaterials = currentNode.materials
+  if (currentNodeMaterials) {
+    currentNodeMaterials.forEach(currentNodeMaterial => {
+    currentNodeMaterial.setAlphaMode("BLEND");
+    const currentAlpha = currentNodeMaterial.pbrMetallicRoughness.baseColorFactor[3]
+    const color = currentNodeMaterial.pbrMetallicRoughness.baseColorFactor
+    color[3] = currentAlpha === 1 ? 0 : 1
+    currentNodeMaterial.pbrMetallicRoughness.setBaseColorFactor(color)
+  });
+  }
 }
 
 const getColor = (index) => {
@@ -57,6 +66,19 @@ const calculateColor = (percent=0, currentAlpha=1) => {
   const alpha = currentAlpha
   return [red / 255, green / 255, blue / 255, alpha]
 }
+
+const hasMaterials = (node) => {
+  const materials = node.materials
+  return node.materials;
+};
+
+// Проверяет видимость ноды (по альфа-каналу первого материала)
+const isNodeVisible = (node) => {
+  if (!hasMaterials(node)) return false;
+  return Array.from(node.materials.values()).every(material => {
+    return material.pbrMetallicRoughness?.baseColorFactor?.[3] === 1;
+  });
+};
 </script>
 
 <template>
@@ -65,15 +87,20 @@ const calculateColor = (percent=0, currentAlpha=1) => {
       <div v-if="modelLoaded">
         <h3>Детали модели:</h3>
         <ul>
-          <li v-for="(item, index) in materials" :key="item.name">
-            <label>
-              <input 
-                type="checkbox" 
-                :checked="item.pbrMetallicRoughness.baseColorFactor[3] === 1" 
-                @change="toggleVisibility(index)" 
-              />
-              {{ item.name }}
-            </label>
+          <li v-for="(item, index) in nodes" :key="item.name">
+            <template v-if="hasMaterials(item)">
+              <label>
+                <input 
+                  type="checkbox" 
+                  :checked="isNodeVisible(item)"
+                  @change="toggleVisibility(item.name)" 
+                />
+                {{ item.name }}
+              </label>
+            </template>
+            <template v-else>
+              <span class="no-materials">{{ item.name }} (нет материалов)</span>
+            </template>
           </li>
         </ul>
       </div>
