@@ -1,6 +1,6 @@
 <script setup>
 import '@google/model-viewer'
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { getModelStats } from '../services/params'
 
 const props = defineProps({
@@ -13,65 +13,68 @@ const materials = ref([])
 const nodes = ref([])
 const modelLoaded = ref(false)
 
-const onModelLoad = async () => {
+// Получение данных по состоянию деталей
+const nodesWithStats = computed(() => {
+  if (!nodes.value.length) return []
+  return getModelStats().map(item => {
+    const nodeName = Object.keys(item)[0]
+    return { nodeName, percent: item[nodeName] }
+  })
+})
+
+// Подгрузка списка деталей и материалов модели
+const loadModelData = () => {
   const modelViewer = modelViewerRef.value
-  if (modelViewer && modelViewer.model) {
-    materials.value = modelViewer.model.materials
-    nodes.value = modelViewer.model[Object.getOwnPropertySymbols(modelViewer.model).find(sym => sym.description === 'hierarchy')];
-    const nodesData = getModelStats()
-    nodesData.forEach((item,index) => {
-      
-      const nodeName = Object.keys(item)[0];
+  if (!modelViewer?.model) return
+  
+  materials.value = modelViewer.model.materials
+  const hierarchySymbol = Object.getOwnPropertySymbols(modelViewer.model).find(sym => sym.description === 'hierarchy')
+  nodes.value = modelViewer.model[hierarchySymbol] || []
+}
 
-      const currentNode = nodes.value.find((n) => n.name === nodeName);
+// Подкраска деталей в зависимости от состояния
+const applyColorToNodes = () => {
+  nodesWithStats.value.forEach(({ nodeName, percent }) => {
+    const currentNode = nodes.value.find(n => n.name === nodeName)
+    if (!currentNode?.materials) return
+    
+    const color = calculateColor(percent)
+    currentNode.materials.forEach(material => {
+      material.pbrMetallicRoughness?.setBaseColorFactor(color)
+    })
+  })
+}
 
-      const percent = item[nodeName];
-
-      const color = calculateColor(percent);
-
-      const currentNodeMaterials = currentNode.materials
-
-      currentNodeMaterials.forEach((currentMaterial, key) => {
-        currentMaterial.pbrMetallicRoughness.setBaseColorFactor(color);
-      });
-
-    });
+// После полной загрузки модели
+const onModelLoad = async () => {
+  loadModelData()
+  applyColorToNodes()
   modelLoaded.value = true
-  }
 }
 
-const toggleVisibility = (nodeName) => {
-  const currentNode = nodes.value.find((n) => n.name === nodeName);
-  const currentNodeMaterials = currentNode.materials
-  if (currentNodeMaterials) {
-    currentNodeMaterials.forEach(currentNodeMaterial => {
-    currentNodeMaterial.setAlphaMode("BLEND");
-    const currentAlpha = currentNodeMaterial.pbrMetallicRoughness.baseColorFactor[3]
-    const color = currentNodeMaterial.pbrMetallicRoughness.baseColorFactor
-    color[3] = currentAlpha === 1 ? 0 : 1
-    currentNodeMaterial.pbrMetallicRoughness.setBaseColorFactor(color)
-  });
-  }
+// Видимость детали
+const toggleNodeVisibility = (node) => {
+  if (!hasMaterials(node)) return
+  node.materials.forEach(material => {
+    material.setAlphaMode("BLEND")
+    const color = material.pbrMetallicRoughness.baseColorFactor
+    color[3] = color[3] === 1 ? 0 : 1
+    material.pbrMetallicRoughness.setBaseColorFactor(color)
+  })
 }
 
-const getColor = (index) => {
-  const material = materials.value[index]
-  return material.pbrMetallicRoughness.baseColorFactor
-}
-
+// Рассчёт цвета в зависимости от состояния
 const calculateColor = (percent=0, currentAlpha=1) => {
-  const red = Math.min(255, (percent * 2.55))
-  const green = 255 - red
-  const blue = 0
-  const alpha = currentAlpha
-  return [red / 255, green / 255, blue / 255, alpha]
+  const red = Math.min(255, percent * 2.55)
+  return [red / 255, (255 - red) / 255, 0, currentAlpha]
 }
 
+// Есть ли материалы у детали
 const hasMaterials = (node) => {
-  const materials = node.materials
-  return node.materials;
+  return node.materials
 };
 
+// Отображается ли деталь в данный момент
 const isNodeVisible = (node) => {
   if (!hasMaterials(node)) return false;
   return Array.from(node.materials.values()).every(material => {
@@ -81,80 +84,101 @@ const isNodeVisible = (node) => {
 </script>
 
 <template>
-  <div class="container">
-    <div class="sidebar">
-      <div v-if="modelLoaded">
-        <h3>Детали модели:</h3>
-        <ul>
-          <li v-for="(item, index) in nodes" :key="item.name">
-            <template v-if="hasMaterials(item)">
-              <label>
+  <div class="model-viewer-container">
+    <aside class="model-sidebar">
+      <template v-if="modelLoaded">
+        <h3 class="sidebar-title">Детали модели:</h3>
+        <ul class="nodes-list">
+          <li 
+            v-for="node in nodes" 
+            :key="node.name" 
+            class="node-item"
+          >
+            <template v-if="hasMaterials(node)">
+              <label class="node-label">
                 <input 
                   type="checkbox" 
-                  :checked="isNodeVisible(item)"
-                  @change="toggleVisibility(item.name)" 
+                  :checked="isNodeVisible(node)"
+                  @change="toggleNodeVisibility(node)" 
+                  class="node-checkbox"
                 />
-                {{ item.name }}
+                {{ node.name }}
               </label>
             </template>
-            <template v-else>
-              <span class="no-materials">{{ item.name }} (нет материалов)</span>
-            </template>
+            <span v-else class="node-no-materials">
+              {{ node.name }} (нет материалов)
+            </span>
           </li>
         </ul>
-      </div>
-    </div>
+      </template>
+    </aside>
 
-    <div class="model-container">
+    <main class="model-display">
       <model-viewer
         ref="modelViewerRef"
-        :src="props.model"
-        camera-controls="true"
-        :alt="props.name"
+        :src="model"
+        :alt="name"
+        camera-controls
         interaction-prompt="when-focused"
-        style="width: 100%; height: 100%"
         @load="onModelLoad"
-      ></model-viewer>
-    </div>
+      />
+    </main>
   </div>
 </template>
 
 <style scoped>
-.container {
+.model-viewer-container {
   display: flex;
-  height: 100vh;
+  height: 90vh;
   width: 100%;
 }
 
-.sidebar {
+.model-sidebar {
   width: 300px;
-  background-color: #2d2d2d;
-  color: white;
-  padding: 20px;
+  background-color: var(--sidebar-bg, #2d2d2d);
+  color: var(--sidebar-text, white);
+  padding: 1.25rem;
   overflow-y: auto;
-  max-height: 100vh;
 }
 
-.model-container {
+.model-display {
   flex: 1;
-  background-color: #000;
-  padding: 20px;
+  background-color: var(--model-bg, #000);
+  padding: 1.25rem;
 }
 
-ul {
-  list-style-type: none;
-  padding: 0;
-}
-
-li {
-  margin: 10px 0;
-}
-
-h3 {
+.sidebar-title {
   margin-top: 0;
+  margin-bottom: 1rem;
 }
 
-.read-the-docs {
-  color: #888;
+.nodes-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.node-item {
+  margin: 0.625rem 0;
+}
+
+.node-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.node-checkbox {
+  cursor: inherit;
+}
+
+.node-no-materials {
+  opacity: 0.6;
+}
+
+model-viewer {
+  width: 100%;
+  height: 100%;
 }
 </style>
